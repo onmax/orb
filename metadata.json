@@ -1,0 +1,5 @@
+{
+  "name": "Nimiq Data Orb",
+  "description": "A 3D visualization of the Nimiq blockchain network featuring a pulsating organic node structure, distinct validator nodes, and real-time block propagation simulation using React Three Fiber.",
+  "requestFramePermissions": []
+}
