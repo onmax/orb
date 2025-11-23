@@ -1,7 +1,7 @@
 
 import React, { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Stars, Sparkles } from '@react-three/drei';
+import { OrbitControls, Stars, Sparkles, Environment } from '@react-three/drei';
 import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import { Orb } from './Orb';
 
@@ -14,43 +14,35 @@ export const Scene: React.FC<SceneProps> = ({ audioData }) => {
     <Canvas
       dpr={[1, 2]}
       camera={{ position: [0, 0, 32], fov: 35 }}
-      gl={{ antialias: false, alpha: true, toneMappingExposure: 1.2 }}
+      gl={{ antialias: false, alpha: true, toneMappingExposure: 1.0 }}
     >
       <Suspense fallback={null}>
         {/* 
-           Lighting:
-           Neutral/Cool base to let colorful nodes pop
+          High-contrast studio environment to make the flat-shaded nodes pop 
+          with distinct reflections on their facets.
         */}
-        <ambientLight intensity={0.3} color="#101025" />
-        
-        {/* Core Light: Subtle Magenta */}
-        <pointLight position={[0, 0, 0]} intensity={2} color="#D500F9" distance={20} decay={2} />
-        
-        {/* Rim Lights: Cyan and Purple mix */}
-        <pointLight position={[30, 10, 20]} intensity={15} color="#00E5FF" distance={100} decay={1} />
-        <pointLight position={[-30, -10, -10]} intensity={15} color="#7C4DFF" distance={100} decay={1} />
+        <Environment preset="warehouse" blur={0.6} />
 
-        {/* Multi-colored Atmosphere */}
-        <Sparkles count={100} scale={25} size={4} speed={0.4} opacity={0.5} color="#00E5FF" />
-        <Sparkles count={100} scale={35} size={6} speed={0.2} opacity={0.4} color="#D500F9" />
+        <ambientLight intensity={0.4} color="#ffffff" />
+        
+        {/* Directional lights to catch the edges of the dodecahedrons */}
+        <pointLight position={[20, 10, 20]} intensity={4} color="#ffffff" distance={100} />
+        <pointLight position={[-20, -10, -10]} intensity={2} color="#cbd5e1" distance={100} />
+        <pointLight position={[0, 20, 0]} intensity={2} color="#f8fafc" distance={50} />
 
-        {/* Distant Stars */}
-        <Stars radius={100} depth={50} count={1000} factor={4} saturation={0.5} fade speed={0.2} />
+        <Sparkles count={60} scale={35} size={2} speed={0.2} opacity={0.15} color="#ffffff" />
+        <Stars radius={100} depth={50} count={800} factor={4} saturation={0} fade speed={0.05} />
         
         <Orb audioData={audioData} />
 
         <EffectComposer enableNormalPass={false}>
-          {/* 
-             Bloom: Strong intensity to make colorful nodes glow neon
-          */}
           <Bloom 
-            luminanceThreshold={0.2} 
+            luminanceThreshold={1.1} 
             mipmapBlur 
-            intensity={1.0} 
-            radius={0.5} 
-            levels={8}
+            intensity={0.5} 
+            radius={0.3} 
           />
-          <Noise opacity={0.05} />
+          <Noise opacity={0.04} />
           <Vignette eskil={false} offset={0.1} darkness={0.6} />
         </EffectComposer>
 
@@ -60,7 +52,7 @@ export const Scene: React.FC<SceneProps> = ({ audioData }) => {
           minDistance={15} 
           maxDistance={70} 
           autoRotate 
-          autoRotateSpeed={0.3} 
+          autoRotateSpeed={0.1} 
         />
       </Suspense>
     </Canvas>

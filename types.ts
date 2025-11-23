@@ -7,6 +7,7 @@ export enum NodeType {
 }
 
 export type LifeCycleState = 'HIDDEN' | 'SPAWNING' | 'ACTIVE' | 'DYING';
+export type ConnectionState = 'CONNECTED' | 'DISCONNECTED' | 'RECONNECTING';
 
 export interface NodeData {
   id: number;
@@ -39,6 +40,11 @@ export interface LinkData {
   targetIndex: number;
   isValidatorLink: boolean; // To identify validator-validator links for rotation
   phaseOffset: number; // For animating opacity
+
+  // Connection Simulation
+  connectionState: ConnectionState;
+  reconnectProgress: number; // 0.0 to 1.0 (for growing animation)
+  disconnectTimer: number; // Time in seconds to remain disconnected
 }
 
 export interface Beam {

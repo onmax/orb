@@ -9,9 +9,8 @@ const audioSim = new AudioSimulator();
 
 function App() {
   const [audioData, setAudioData] = useState(0);
-  const [blockHeight, setBlockHeight] = useState(3401294); // Arbitrary start block
+  const [blockHeight, setBlockHeight] = useState(3401294); 
   
-  // Animation loop for non-3D logic (Audio sampling)
   useEffect(() => {
     let frameId: number;
     const loop = () => {
@@ -23,7 +22,6 @@ function App() {
     return () => cancelAnimationFrame(frameId);
   }, []);
 
-  // Block height simulator
   useEffect(() => {
     const interval = setInterval(() => {
       setBlockHeight(h => h + 1);
@@ -32,15 +30,12 @@ function App() {
   }, []);
 
   return (
-    // Updated Background: Lighter Deep Space Gradient
-    // Changed from very dark #1F2348... to a lighter #2E3669 base
-    <div className="relative w-full h-full bg-[radial-gradient(circle_at_center,#2E3669_0%,#181B38_50%,#0B0C16_100%)] overflow-hidden">
-      {/* 3D Scene Layer */}
+    // Background: Very deep, neutral dark grey/black gradient. Minimalistic.
+    <div className="relative w-full h-full bg-[radial-gradient(circle_at_center,#0f172a_0%,#000000_100%)] overflow-hidden">
       <div className="absolute inset-0 z-0">
         <Scene audioData={audioData} />
       </div>
 
-      {/* UI Layer */}
       <div className="absolute inset-0 z-10 pointer-events-none">
         <UI blockHeight={blockHeight} />
       </div>

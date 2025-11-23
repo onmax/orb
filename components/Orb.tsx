@@ -2,7 +2,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { NodeData, NodeType, LinkData, Beam, LifeCycleState } from '../types';
+import { NodeData, NodeType, LinkData, Beam, LifeCycleState, ConnectionState } from '../types';
 import {
   NODE_COUNT,
   VALIDATOR_COUNT,
@@ -10,13 +10,14 @@ import {
   NODE_PALETTE,
   COLOR_LINK,
   BEAM_SPEED,
+  BEAM_COLOR,
   BLOCK_INTERVAL_MS,
   PEER_LIFETIME_MS,
   PEER_TRANSITION_MS,
   VALIDATOR_ROTATION_SPEED
 } from '../constants';
 
-// Extend NodeData to store a specific base color for that node (for variety)
+// Extend NodeData to store a specific base color for that node
 interface ExtendedNodeData extends NodeData {
     baseColor: THREE.Color;
 }
@@ -58,7 +59,8 @@ const generateGraph = () => {
       theta: theta,
       radius: r,
       lastBlockTime: -999,
-      baseColor: getRandomColor() // Random vibrant color
+      // Validators: slightly brighter base
+      baseColor: new THREE.Color('#ffffff') 
     });
   }
 
@@ -68,13 +70,13 @@ const generateGraph = () => {
     const v = Math.random();
     const theta = 2 * Math.PI * u;
     const phi = Math.acos(2 * v - 1);
-    const r = ORB_RADIUS * (0.85 + Math.random() * 0.15); 
+    const r = ORB_RADIUS * (0.9 + Math.random() * 0.2); 
     
     const x = r * Math.sin(phi) * Math.cos(theta);
     const y = r * Math.sin(phi) * Math.sin(theta);
     const z = r * Math.cos(phi);
     const targetPos = new THREE.Vector3(x, y, z);
-    const startPos = targetPos.clone().normalize().multiplyScalar(ORB_RADIUS * 1.5);
+    const startPos = targetPos.clone().normalize().multiplyScalar(ORB_RADIUS * 1.8);
 
     const initialLife = Math.random();
     let initialState: LifeCycleState = 'HIDDEN';
@@ -106,12 +108,11 @@ const generateGraph = () => {
       theta: theta,
       radius: r,
       lastBlockTime: 0,
-      baseColor: getRandomColor() // Random vibrant color
+      baseColor: getRandomColor() 
     });
   }
 
-  // --- 3. Generate Links (LOWER DENSITY) ---
-  
+  // --- 3. Generate Links ---
   // Validators Mesh 
   for (let i = 0; i < VALIDATOR_COUNT; i++) {
     const distances = [];
@@ -121,7 +122,6 @@ const generateGraph = () => {
     }
     distances.sort((a, b) => a.dist - b.dist);
     
-    // Reduced connections for cleaner look (was 3)
     const connectionCount = 2; 
     for (let k = 0; k < connectionCount; k++) {
         const targetId = distances[k].id;
@@ -132,7 +132,10 @@ const generateGraph = () => {
                 sourceIndex: Math.min(i, targetId), 
                 targetIndex: Math.max(i, targetId), 
                 isValidatorLink: true,
-                phaseOffset: Math.random() * Math.PI * 2
+                phaseOffset: Math.random() * Math.PI * 2,
+                connectionState: 'CONNECTED',
+                reconnectProgress: 1.0,
+                disconnectTimer: 0
             });
         }
     }
@@ -149,15 +152,22 @@ const generateGraph = () => {
      valCandidates.sort((a, b) => a.dist - b.dist);
 
      let valConnections = 0;
-     // Connect to just 1 validator usually, max 2 (was min 2)
      for (let k = 0; k < valCandidates.length; k++) {
         if (valConnections >= 1) break; 
         const v = valCandidates[k];
-        if (v.dist < ORB_RADIUS * 2.0) {
+        if (v.dist < ORB_RADIUS * 2.5) {
             if (!nodes[i].connections.includes(v.id)) {
                 nodes[i].connections.push(v.id);
                 nodes[v.id].connections.push(i);
-                links.push({ sourceIndex: v.id, targetIndex: i, isValidatorLink: false, phaseOffset: 0 });
+                links.push({ 
+                    sourceIndex: v.id, 
+                    targetIndex: i, 
+                    isValidatorLink: false, 
+                    phaseOffset: 0,
+                    connectionState: 'CONNECTED',
+                    reconnectProgress: 1.0,
+                    disconnectTimer: 0
+                });
                 valConnections++;
             }
         }
@@ -165,7 +175,7 @@ const generateGraph = () => {
 
      // Connect to nearby peers
      const peerDistances = [];
-     const scanRange = 60; // Reduced scan range (was 100)
+     const scanRange = 60; 
      const startScan = Math.max(VALIDATOR_COUNT, i - scanRange);
      const endScan = Math.min(NODE_COUNT, i + scanRange);
      
@@ -176,17 +186,23 @@ const generateGraph = () => {
      peerDistances.sort((a, b) => a.dist - b.dist);
 
      let peerConnections = 0;
-     // Reduced peer connections (was 4)
      for (let k = 0; k < 8; k++) {
         if (peerConnections >= 2) break; 
         if (k >= peerDistances.length) break;
         const targetId = peerDistances[k].id;
-        // Reduced max distance for tighter clusters, less messy long lines (was 6.0)
-        if (peerDistances[k].dist > 5.0) continue; 
+        if (peerDistances[k].dist > 6.0) continue; 
         if (!nodes[i].connections.includes(targetId)) {
              nodes[i].connections.push(targetId);
              nodes[targetId].connections.push(i);
-             links.push({ sourceIndex: i, targetIndex: targetId, isValidatorLink: false, phaseOffset: 0 });
+             links.push({ 
+                 sourceIndex: i, 
+                 targetIndex: targetId, 
+                 isValidatorLink: false, 
+                 phaseOffset: 0,
+                 connectionState: 'CONNECTED',
+                 reconnectProgress: 1.0,
+                 disconnectTimer: 0
+             });
              peerConnections++;
         }
      }
@@ -214,7 +230,7 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
   const tempColor = useMemo(() => new THREE.Color(), []);
   const tempMatrix = useMemo(() => new THREE.Matrix4(), []);
   const cLink = useMemo(() => new THREE.Color(COLOR_LINK), []);
-  const cBeam = useMemo(() => new THREE.Color('#FF9500'), []); // Orange Beam Color
+  const cBeam = useMemo(() => new THREE.Color(BEAM_COLOR), []);
 
   // Initialize Line Buffers
   useEffect(() => {
@@ -235,10 +251,10 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
           graphDataRef.current.nodes[randomValidatorIdx].lastBlockTime = now;
       }
       const newBeam: Beam = {
-        id: crypto.randomUUID(),
+        id: Math.random().toString(36).slice(2), 
         originIndex: randomValidatorIdx,
         startTime: now,
-        maxDistance: ORB_RADIUS * 2.5, 
+        maxDistance: ORB_RADIUS * 2.2, 
       };
       setBeams((prev) => [...prev, newBeam]);
     }, BLOCK_INTERVAL_MS);
@@ -263,13 +279,13 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
     const time = Date.now() / 1000;
     const dt = delta * 1000;
 
-    if (groupRef.current) groupRef.current.rotation.y += delta * 0.04;
+    if (groupRef.current) groupRef.current.rotation.y += delta * 0.02; 
 
-    // 1. Dynamic Rewiring
+    // 1. Dynamic Rewiring (Legacy logic - kept for fallback, but main instability is below)
     if (Math.random() > 0.2) { 
         const linkIdx = Math.floor(Math.random() * links.length);
         const link = links[linkIdx];
-        if (!link.isValidatorLink && nodes[link.sourceIndex].state === 'ACTIVE') {
+        if (!link.isValidatorLink && nodes[link.sourceIndex].state === 'ACTIVE' && link.connectionState === 'CONNECTED') {
             const candidateId = VALIDATOR_COUNT + Math.floor(Math.random() * (NODE_COUNT - VALIDATOR_COUNT));
             if (candidateId !== link.sourceIndex && candidateId !== link.targetIndex) {
                  const dist = nodes[link.sourceIndex].currentPosition.distanceTo(nodes[candidateId].currentPosition);
@@ -283,9 +299,9 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
         const n = nodes[i];
         
         // --- Motion ---
-        const noiseX = Math.sin(time * 0.5 + n.id) * 0.08;
-        const noiseY = Math.cos(time * 0.3 + n.id) * 0.08;
-        const noiseZ = Math.sin(time * 0.4 + n.id) * 0.08;
+        const noiseX = Math.sin(time * 0.5 + n.id) * 0.05;
+        const noiseY = Math.cos(time * 0.3 + n.id) * 0.05;
+        const noiseZ = Math.sin(time * 0.4 + n.id) * 0.05;
 
         if (n.type === NodeType.VALIDATOR) {
             n.theta += VALIDATOR_ROTATION_SPEED * delta;
@@ -306,7 +322,7 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
             } else if (n.state === 'HIDDEN') {
                 if (n.timer <= 0) {
                     n.state = 'SPAWNING'; n.timer = PEER_TRANSITION_MS;
-                    n.startPosition.copy(n.targetPosition).normalize().multiplyScalar(ORB_RADIUS * 1.4);
+                    n.startPosition.copy(n.targetPosition).normalize().multiplyScalar(ORB_RADIUS * 1.6);
                     n.currentPosition.copy(n.startPosition);
                 }
             } else if (n.state === 'SPAWNING') {
@@ -321,62 +337,92 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
             }
         }
 
-        // --- Beams Logic ---
+        // --- Beams Logic with Softer Decay ---
         let beamIntensity = 0;
         if (n.opacity > 0.01) {
              for (const beam of beams) {
                 const dist = n.currentPosition.distanceTo(nodes[beam.originIndex].currentPosition);
                 const waveDist = (time - beam.startTime) * BEAM_SPEED;
-                const waveWidth = 8.0; 
+                const waveWidth = 8.0;
 
                 if (dist < waveDist && dist > waveDist - waveWidth) {
                     const p = 1 - (waveDist - dist) / waveWidth;
-                    beamIntensity = Math.max(beamIntensity, Math.pow(p, 2));
+                    
+                    // DECAY: Smoother fade.
+                    const ratio = dist / beam.maxDistance;
+                    const decay = Math.max(0, 1 - ratio); 
+                    
+                    // Reduce overall intensity (0.6 multiplier) so it's less dominant
+                    beamIntensity = Math.max(beamIntensity, Math.pow(p, 2) * decay * 0.6);
                 }
             }
         }
 
-        // --- Validator Flash ---
+        // --- Validator Flash (Growing Glow Effect) ---
         let blockFlash = 0;
+        
         if (n.type === NodeType.VALIDATOR) {
             const timeSinceBlock = time - n.lastBlockTime;
-            if (timeSinceBlock < 1.5 && timeSinceBlock >= 0) {
-                blockFlash = Math.pow(1 - (timeSinceBlock / 1.5), 3);
+            // A 2-second lifecycle for the flash
+            const flashDuration = 2.0; 
+            const growTime = 0.4; // 0.4s to fully grow
+
+            if (timeSinceBlock >= 0 && timeSinceBlock < flashDuration) {
+                if (timeSinceBlock < growTime) {
+                    // Growth Phase: Smooth sine easing for a natural "swell"
+                    const t = timeSinceBlock / growTime;
+                    blockFlash = Math.sin(t * Math.PI * 0.5); 
+                } else {
+                    // Decay Phase: Linear fade out
+                    const t = (timeSinceBlock - growTime) / (flashDuration - growTime);
+                    blockFlash = 1 - t; 
+                }
             }
         }
 
         // --- Matrix & Scale ---
-        let scale = 0.4; 
-        if (n.type === NodeType.VALIDATOR) scale = 2.2; // Increased Validator Size
+        let scale = 0.25; 
+        if (n.type === NodeType.VALIDATOR) scale = 0.9; // Validators larger
         
-        if (beamIntensity > 0) scale *= (1 + beamIntensity * 0.8); 
-        if (blockFlash > 0) scale *= (1 + blockFlash * 0.5);
+        // Scale modification for beam hit
+        if (beamIntensity > 0) scale *= (1 + beamIntensity * 0.2); 
+        
+        // Scale modification for block generation 
+        // "Growing glow that doesn't grow much": limit scale increase to ~35%
+        if (blockFlash > 0) scale *= (1 + blockFlash * 0.35);
         
         scale *= n.opacity;
         if (scale < 0.01) scale = 0;
 
         tempMatrix.makeScale(scale, scale, scale);
         tempMatrix.setPosition(n.currentPosition);
+        
+        // Rotation for "Gem" look
+        const rot = (time * 0.5) + (n.id * 1.1);
+        tempMatrix.multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rot, rot, rot))); 
+        
         nodesMeshRef.current.setMatrixAt(i, tempMatrix);
 
-        // --- HDR Color Logic (Colorful) ---
-        
-        // Boost brightness for glow effect
+        // --- Color Logic ---
         if (blockFlash > 0) {
-            // Flash bright orange for new blocks on validators
-            tempColor.copy(cBeam).lerp(n.baseColor, 0.3); // Mostly beam color
-            tempColor.multiplyScalar(3 + blockFlash * 20.0);
+            // Source of Energy: Intense White
+            tempColor.setHex(0xFFFFFF);
+            // "Easy to spot": significant brightness boost for bloom
+            // Base 1.5 + variable 5.5 = max 7.0 (Very bright, triggers bloom halo)
+            // This creates the "glow" without physically growing the mesh too much.
+            tempColor.multiplyScalar(1.5 + blockFlash * 5.5); 
         } else if (beamIntensity > 0) {
-            // Beam hit glow - TURN ORANGE
-            tempColor.copy(cBeam); 
-            tempColor.multiplyScalar(2 + beamIntensity * 15.0); 
+            // Beam hit - White but softer
+            tempColor.copy(cBeam);
+            const intensity = 1 + beamIntensity * 1.5;
+            tempColor.multiplyScalar(intensity); 
         } else {
-            // Standard glow (Node Base Color)
+            // Standard State
             tempColor.copy(n.baseColor);
             if (n.type === NodeType.VALIDATOR) {
-                tempColor.multiplyScalar(3.0); // Validators glow harder
+                tempColor.multiplyScalar(1.2); 
             } else {
-                tempColor.multiplyScalar(1.5); // Peers soft glow
+                tempColor.multiplyScalar(0.8); 
             }
         }
 
@@ -389,50 +435,98 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
     // 3. Update Links
     for (let i = 0; i < links.length; i++) {
         const link = links[i];
+        
+        // --- Network Instability Simulation ---
+        if (!link.isValidatorLink) {
+             if (link.connectionState === 'CONNECTED') {
+                 // Random chance to drop connection
+                 if (Math.random() < 0.0003) { 
+                     link.connectionState = 'DISCONNECTED';
+                     link.disconnectTimer = 1.0 + Math.random() * 2.0; // 1-3s downtime
+                     link.reconnectProgress = 0;
+                 }
+             } else if (link.connectionState === 'DISCONNECTED') {
+                 link.disconnectTimer -= delta; 
+                 if (link.disconnectTimer <= 0) {
+                     link.connectionState = 'RECONNECTING';
+                 }
+             } else if (link.connectionState === 'RECONNECTING') {
+                 // Grow connection back
+                 link.reconnectProgress += delta * 1.5; // ~0.7s to reconnect
+                 if (link.reconnectProgress >= 1) {
+                     link.reconnectProgress = 1;
+                     link.connectionState = 'CONNECTED';
+                 }
+             }
+        } else {
+             // Validators always connected
+             link.reconnectProgress = 1.0; 
+        }
+
         const n1 = nodes[link.sourceIndex];
         const n2 = nodes[link.targetIndex];
-        const dist = n1.currentPosition.distanceTo(n2.currentPosition);
         
+        const dist = n1.currentPosition.distanceTo(n2.currentPosition);
         let alpha = Math.min(n1.opacity, n2.opacity);
         if (dist > 7.0) alpha = 0; 
 
-        if (alpha < 0.01) {
+        // Skip rendering if fully disconnected or nodes invisible
+        if (link.reconnectProgress < 0.01 || alpha < 0.01) {
              linePositions.setXYZ(i*2, 0,0,0); linePositions.setXYZ(i*2+1, 0,0,0);
              continue;
         }
 
-        linePositions.setXYZ(i*2, n1.currentPosition.x, n1.currentPosition.y, n1.currentPosition.z);
-        linePositions.setXYZ(i*2+1, n2.currentPosition.x, n2.currentPosition.y, n2.currentPosition.z);
+        // Calculate geometry: Grow line from Source to Target based on reconnectProgress
+        const startX = n1.currentPosition.x;
+        const startY = n1.currentPosition.y;
+        const startZ = n1.currentPosition.z;
+
+        const endX = startX + (n2.currentPosition.x - startX) * link.reconnectProgress;
+        const endY = startY + (n2.currentPosition.y - startY) * link.reconnectProgress;
+        const endZ = startZ + (n2.currentPosition.z - startZ) * link.reconnectProgress;
+
+        linePositions.setXYZ(i*2, startX, startY, startZ);
+        linePositions.setXYZ(i*2+1, endX, endY, endZ);
 
         // Beam on link
         let beamHit = 0;
-        const mid = new THREE.Vector3().lerpVectors(n1.currentPosition, n2.currentPosition, 0.5);
+        const mid = new THREE.Vector3(startX + (endX - startX)*0.5, startY + (endY - startY)*0.5, startZ + (endZ - startZ)*0.5);
+        
+        // Calculate standard link color
         for (const beam of beams) {
             const origin = nodes[beam.originIndex].currentPosition;
             const d = mid.distanceTo(origin);
             const waveDist = (time - beam.startTime) * BEAM_SPEED;
             if (d < waveDist && d > waveDist - 6.0) {
-                beamHit = Math.max(beamHit, 1 - (waveDist - d)/6.0);
+                const p = 1 - (waveDist - d)/6.0;
+                const decay = Math.max(0, 1 - (d / beam.maxDistance));
+                beamHit = Math.max(beamHit, p * decay);
             }
         }
 
         if (beamHit > 0) {
-            // Link lights up ORANGE
             tempColor.copy(cBeam);
-            tempColor.multiplyScalar(2 + beamHit * 10.0); 
+            tempColor.multiplyScalar(0.2 + beamHit * 0.5); // softer beam on links
         } else {
-            // Inactive Link
             tempColor.copy(cLink); 
             if (link.isValidatorLink) {
-                 tempColor.multiplyScalar(2.0);
+                 tempColor.multiplyScalar(1.2); 
             } else {
-                tempColor.multiplyScalar(1.5);
+                tempColor.multiplyScalar(0.4); 
             }
         }
-        
         tempColor.multiplyScalar(alpha);
+
+        // Set Colors
+        // Start point is always the standard link color
         lineColors.setXYZ(i*2, tempColor.r, tempColor.g, tempColor.b);
-        lineColors.setXYZ(i*2+1, tempColor.r, tempColor.g, tempColor.b);
+
+        // End point: If Reconnecting, highlight tip (Bright White)
+        if (link.connectionState === 'RECONNECTING') {
+            lineColors.setXYZ(i*2+1, 1.0, 1.0, 1.0); 
+        } else {
+            lineColors.setXYZ(i*2+1, tempColor.r, tempColor.g, tempColor.b);
+        }
     }
 
     linePositions.needsUpdate = true;
@@ -442,13 +536,23 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
   return (
     <group ref={groupRef}>
       <instancedMesh ref={nodesMeshRef} args={[undefined, undefined, NODE_COUNT]}>
-        <sphereGeometry args={[0.15, 16, 16]} />
+        {/* 
+            Dodecahedron for "Tech" look.
+            Emissive material logic: 
+            - metalness: 0 (non-metallic as requested)
+            - emissive: white (drives the brightness)
+            - emissiveIntensity: controls the glow strength
+            - flatShading: true (keeps the faceted look visible)
+        */}
+        <dodecahedronGeometry args={[0.32, 0]} /> 
         <meshStandardMaterial 
           toneMapped={false}
-          roughness={0.9}
-          metalness={0.1} 
-          emissive="#000000"
-          emissiveIntensity={0}
+          roughness={0.4} 
+          metalness={0.0} 
+          flatShading={true}
+          emissive="#ffffff"
+          emissiveIntensity={0.3}
+          color="#aaaaaa"
         />
       </instancedMesh>
       
@@ -457,7 +561,7 @@ export const Orb: React.FC<OrbProps> = ({ audioData }) => {
         <lineBasicMaterial 
           vertexColors 
           transparent 
-          opacity={0.4} 
+          opacity={0.15} 
           blending={THREE.AdditiveBlending} 
           depthWrite={false} 
           toneMapped={false}
